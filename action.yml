@@ -1,0 +1,226 @@
+# Cursor CLI PR review (composite Action)
+#
+# Cross-repository calls from private repos must use this file: `uses: owner/repo@<SHA>`.
+# GitHub fetches the whole action repository into github.action_path, so there is no
+# need to actions/checkout this repo again (that step would use the caller's
+# GITHUB_TOKEN and 404 on a private repo).
+#
+# This repository is public, so any caller can read it; no Settings -> Actions ->
+# General -> Access configuration is required.
+#
+# Callers always pass CURSOR_API_KEY through with.cursor_api_key (never environment):
+#   jobs:
+#     code-review:
+#       runs-on: ubuntu-latest
+#       timeout-minutes: 20
+#       concurrency:
+#         group: cursor-code-review-${{ github.event.pull_request.number || inputs.pr_number }}
+#         cancel-in-progress: true
+#       permissions:
+#         contents: read
+#         issues: write
+#         pull-requests: write
+#         actions: write
+#       steps:
+#         - uses: intelligence-research-2026/cursor-code-review-workflow@<SHA>
+#           with:
+#             pr_number: ${{ github.event.pull_request.number || inputs.pr_number }}
+#             caller_event: ${{ github.event_name }}
+#             installer_sha256: ${{ vars.CURSOR_INSTALLER_SHA256 }}
+#             cursor_api_key: ${{ secrets.CURSOR_API_KEY }}
+#
+# concurrency / timeout-minutes / permissions / runs-on are the caller job's responsibility.
+
+name: Cursor Code Review
+description: "Cursor CLI PR review (restricted autonomy: the agent only writes review.md, and the Action posts the comment with gh)"
+
+inputs:
+  pr_number:
+    description: "PR number (always pass it explicitly; do not rely on the event alone)"
+    required: true
+  caller_event:
+    description: "The caller's github.event_name (on forks: only pull_request may skip, everything else is fail-closed)"
+    required: false
+    default: ""
+  review_context:
+    description: "Optional: override the default review priorities (multi-line text)"
+    required: false
+    default: ""
+  review_context_file:
+    description: "Path of the review context file to read from the base ref"
+    required: false
+    default: ".github/review-context.md"
+  installer_sha256:
+    description: "SHA256 of the Cursor install script; empty makes the Install step fail-closed (callers should pass vars.CURSOR_INSTALLER_SHA256)"
+    required: false
+    default: ""
+  model:
+    description: "Model slug; empty defaults to auto (callers should pass vars.CURSOR_MODEL)"
+    required: false
+    default: ""
+  agent_sha256:
+    description: "SHA256 of the cursor-agent binary; empty only emits a notice (callers may pass vars.CURSOR_AGENT_SHA256)"
+    required: false
+    default: ""
+  honor_pr_body_decisions:
+    description: >-
+      Whether the review should honor the skip decisions recorded in the
+      `## Review decisions` section of the PR body. The PR body is
+      author-controlled, so enabling this hands the author a mute switch; it is
+      off by default and should only be enabled explicitly for single-author or
+      advisory setups.
+    required: false
+    default: "false"
+  cursor_api_key:
+    description: "Cursor API Key (callers pass secrets.CURSOR_API_KEY through with.cursor_api_key)"
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Guard action source
+      shell: bash
+      run: |
+        set -euo pipefail
+        if [ -z "${GITHUB_ACTION_PATH}" ]; then
+          echo "::error::GITHUB_ACTION_PATH is empty; cannot locate this action's scripts."
+          exit 1
+        fi
+        echo "::notice::action_scripts_source=${GITHUB_ACTION_PATH}"
+
+    - name: Stage scripts outside workspace
+      shell: bash
+      run: |
+        set -euo pipefail
+        SRC="${GITHUB_ACTION_PATH}/.github/scripts"
+        if [ ! -d "${SRC}" ]; then
+          echo "::error::Did not receive this action's .github/scripts (check the action repository contents)"
+          exit 1
+        fi
+        rm -rf "${RUNNER_TEMP}/ccr"
+        mkdir -p "${RUNNER_TEMP}/ccr"
+        cp -R "${SRC}" "${RUNNER_TEMP}/ccr/scripts"
+
+    - name: Resolve PR base/head
+      id: meta
+      env:
+        GH_TOKEN: ${{ github.token }}
+        GH_REPO: ${{ github.repository }}
+        PR_NUMBER: ${{ inputs.pr_number }}
+        CALLER_EVENT: ${{ inputs.caller_event }}
+        REVIEW_CONTEXT_FILE: ${{ inputs.review_context_file }}
+        REVIEW_CONTEXT_MAX: "6000"
+      run: bash "${RUNNER_TEMP}/ccr/scripts/resolve-pr.sh"
+      shell: bash
+
+    - name: Validate CURSOR_API_KEY
+      if: success() && steps.meta.outputs.skip != 'true'
+      env:
+        CURSOR_API_KEY: ${{ inputs.cursor_api_key }}
+      run: |
+        if [ -z "${CURSOR_API_KEY}" ]; then
+          echo "::error::CURSOR_API_KEY is missing. Configure the Secret in the caller and pass it through with.cursor_api_key."
+          exit 1
+        fi
+        echo "::add-mask::${CURSOR_API_KEY}"
+      shell: bash
+
+    - name: Fetch previous review
+      id: prev
+      if: success() && steps.meta.outputs.skip != 'true'
+      env:
+        GH_TOKEN: ${{ github.token }}
+        GH_REPO: ${{ github.repository }}
+        PR_NUMBER: ${{ inputs.pr_number }}
+        PREV_REVIEW_MAX: "8000"
+      run: bash "${RUNNER_TEMP}/ccr/scripts/fetch-prev-review.sh"
+      shell: bash
+
+    - name: Checkout PR head
+      if: success() && steps.meta.outputs.skip != 'true'
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      with:
+        fetch-depth: 0
+        ref: ${{ steps.meta.outputs.head_sha }}
+        persist-credentials: false
+
+    - name: Install Cursor CLI
+      if: success() && steps.meta.outputs.skip != 'true'
+      env:
+        CURSOR_INSTALLER_SHA256: ${{ inputs.installer_sha256 }}
+        CURSOR_AGENT_SHA256: ${{ inputs.agent_sha256 }}
+      run: bash "${RUNNER_TEMP}/ccr/scripts/install-cursor-cli.sh"
+      shell: bash
+
+    - name: Run review (agent writes file only)
+      id: run_review
+      if: success() && steps.meta.outputs.skip != 'true'
+      env:
+        CURSOR_API_KEY: ${{ inputs.cursor_api_key }}
+        CURSOR_MODEL: ${{ inputs.model || 'auto' }}
+        PR_NUMBER: ${{ inputs.pr_number }}
+        BASE_REF: ${{ steps.meta.outputs.base_ref }}
+        BASE_SHA: ${{ steps.meta.outputs.base_sha }}
+        HEAD_SHA: ${{ steps.meta.outputs.head_sha }}
+        GITHUB_REPOSITORY: ${{ github.repository }}
+        REVIEW_CONTEXT: ${{ inputs.review_context }}
+        REVIEW_CONTEXT_MAX: "6000"
+        REVIEW_ROUND: ${{ steps.prev.outputs.round || '1' }}
+        HONOR_PR_BODY_DECISIONS: ${{ inputs.honor_pr_body_decisions }}
+        GITHUB_TOKEN: ""
+        GH_TOKEN: ""
+      run: |
+        export SCRIPTS_DIR="${RUNNER_TEMP}/ccr/scripts"
+        export BASE_REVIEW_CONTEXT_FILE="${RUNNER_TEMP}/base-review-context.md"
+        export PREV_REVIEW_FILE="${RUNNER_TEMP}/prev-review.md"
+        bash "${SCRIPTS_DIR}/run-review.sh"
+      shell: bash
+
+    - name: Scrub agent-stdout.log
+      id: scrub_agent_stdout
+      if: failure() && steps.meta.outputs.skip != 'true' && steps.run_review.outcome == 'failure'
+      env:
+        CURSOR_API_KEY: ${{ inputs.cursor_api_key }}
+        RUNNER_GH_TOKEN: ${{ github.token }}
+      run: bash "${RUNNER_TEMP}/ccr/scripts/scrub-agent-stdout.sh"
+      shell: bash
+
+    - name: Upload agent-stdout.log
+      if: >-
+        failure() &&
+        steps.meta.outputs.skip != 'true' &&
+        steps.run_review.outcome == 'failure' &&
+        steps.scrub_agent_stdout.outputs.upload == 'true'
+      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      with:
+        name: cursor-agent-stdout-${{ inputs.pr_number }}
+        path: ${{ runner.temp }}/agent-stdout.log
+        if-no-files-found: ignore
+
+    - name: Scrub review.md
+      if: success() && steps.meta.outputs.skip != 'true'
+      env:
+        CURSOR_API_KEY: ${{ inputs.cursor_api_key }}
+        RUNNER_GH_TOKEN: ${{ github.token }}
+      run: bash "${RUNNER_TEMP}/ccr/scripts/scrub-review.sh"
+      shell: bash
+
+    - name: Upload review.md
+      if: success() && steps.meta.outputs.skip != 'true'
+      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      with:
+        name: cursor-code-review-${{ inputs.pr_number }}
+        path: ${{ runner.temp }}/cursor-review.md
+        if-no-files-found: error
+
+    - name: Post review comment
+      if: success() && steps.meta.outputs.skip != 'true'
+      env:
+        GH_TOKEN: ${{ github.token }}
+        GH_REPO: ${{ github.repository }}
+        CURSOR_MODEL: ${{ inputs.model || 'auto' }}
+        HEAD_SHA: ${{ steps.meta.outputs.head_sha }}
+        PR_NUMBER: ${{ inputs.pr_number }}
+        REVIEW_ROUND: ${{ steps.prev.outputs.round || '1' }}
+      run: bash "${RUNNER_TEMP}/ccr/scripts/post-review-comment.sh"
+      shell: bash

@@ -1,0 +1,64 @@
+# Self-integration: `uses` this repository's own composite Action, exactly like a third party would.
+#
+# CURSOR_API_KEY is passed through with.cursor_api_key (a repo-level or org-level Secret); environment is never passed.
+#
+# Dogfooding uses the relative path `./`, so this repo must be checked out first for
+# GitHub to find action.yml. It runs against the PR head so the Action under test
+# always matches the PR contents. Third parties write owner/repo@SHA instead.
+
+name: Cursor Code Review
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+    paths-ignore:
+      - "docs/**"
+      - "wiki/**"
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: "Number of the PR to review (only needed for manual runs)"
+        required: true
+        type: string
+      review_context:
+        description: "Optional: override the default review priorities (multi-line text)"
+        required: false
+        type: string
+
+jobs:
+  code-review:
+    # Draft / bot / fork gating lives in the caller: the Action never guesses from the event name.
+    # Fork PRs can reach a public repo, so early-skip here saves a runner (the callee would skip too, but only after claiming one).
+    if: >
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.pull_request.draft == false &&
+       github.event.pull_request.head.repo.full_name == github.repository &&
+       github.event.pull_request.user.login != 'dependabot[bot]' &&
+       github.event.pull_request.user.login != 'renovate[bot]' &&
+       github.actor != 'dependabot[bot]' &&
+       github.actor != 'renovate[bot]')
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    concurrency:
+      group: cursor-code-review-${{ github.event.pull_request.number || inputs.pr_number }}
+      cancel-in-progress: true
+    permissions:
+      contents: read
+      issues: write
+      pull-requests: write
+      actions: write
+    steps:
+      # uses: ./ reads action.yml from the workspace, so checkout has to come first.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Cursor Code Review
+        uses: ./
+        with:
+          pr_number: ${{ github.event.pull_request.number || inputs.pr_number }}
+          caller_event: ${{ github.event_name }}
+          review_context: ${{ inputs.review_context }}
+          installer_sha256: ${{ vars.CURSOR_INSTALLER_SHA256 }}
+          model: ${{ vars.CURSOR_MODEL || 'auto' }}
+          honor_pr_body_decisions: true
+          cursor_api_key: ${{ secrets.CURSOR_API_KEY }}
