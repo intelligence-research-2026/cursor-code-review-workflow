@@ -1,0 +1,33 @@
+# Reject pull requests that add CJK characters to file contents.
+#
+# Only file contents are checked. Commit messages and PR bodies are governed by
+# AGENTS.md convention, not by this gate.
+#
+# This is a plain grep-style check: it needs no secrets, so it also runs on fork
+# pull requests.
+
+name: English Only
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+
+jobs:
+  english-only:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    concurrency:
+      group: english-only-${{ github.event.pull_request.number }}
+      cancel-in-progress: true
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Check added lines for CJK characters
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: bash .github/scripts/check-english-only.sh
