@@ -32,7 +32,7 @@
 # concurrency / timeout-minutes / permissions / runs-on are the caller job's responsibility.
 
 name: Cursor Code Review
-description: Cursor CLI PR review (restricted autonomy: the agent only writes review.md, and the Action posts the comment with gh)
+description: "Cursor CLI PR review (restricted autonomy: the agent only writes review.md, and the Action posts the comment with gh)"
 
 inputs:
   pr_number:

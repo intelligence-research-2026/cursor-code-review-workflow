@@ -27,6 +27,35 @@ chk() {
 TMP="$(mktemp -d)"
 trap 'rm -rf "${TMP}"' EXIT
 
+# ---------------------------------------------------------------- YAML manifests
+# A colon followed by a space inside an unquoted scalar silently becomes a mapping,
+# which the runner only rejects once it loads the manifest. Parse them here instead.
+yaml_status="$(python3 - "${ROOT}" <<'PY'
+import sys
+try:
+    import yaml
+except ImportError:
+    print("skip")
+    raise SystemExit(0)
+from pathlib import Path
+root = Path(sys.argv[1])
+bad = []
+for rel in ("action.yml",
+            ".github/workflows/code-review.yml",
+            ".github/workflows/english-only.yml"):
+    try:
+        yaml.safe_load((root / rel).read_text(encoding="utf-8"))
+    except Exception as exc:
+        bad.append("%s: %s" % (rel, str(exc).splitlines()[0]))
+print("ok" if not bad else "fail " + "; ".join(bad))
+PY
+)"
+if [ "${yaml_status}" = "skip" ]; then
+  echo "SKIP YAML manifests parse (PyYAML not installed)"
+else
+  chk "YAML manifests parse" "${yaml_status}" "ok"
+fi
+
 # ---------------------------------------------------------------- review context budget
 # When head -c REVIEW_CONTEXT_MAX truncates the default context, trusted
 # instructions get cut mid-sentence.
