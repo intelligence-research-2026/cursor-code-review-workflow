@@ -109,7 +109,10 @@ runs:
         PR_NUMBER: ${{ inputs.pr_number }}
         CALLER_EVENT: ${{ inputs.caller_event }}
         REVIEW_CONTEXT_FILE: ${{ inputs.review_context_file }}
-        REVIEW_CONTEXT_MAX: "6000"
+        # Trusted review priorities. Stay under the 20000-byte PR body cap so
+        # this section cannot drown the fixed constraints in the prompt.
+        # Keep this value identical to the Run review step.
+        REVIEW_CONTEXT_MAX: "12000"
       run: bash "${RUNNER_TEMP}/ccr/scripts/resolve-pr.sh"
       shell: bash
 
@@ -164,7 +167,8 @@ runs:
         HEAD_SHA: ${{ steps.meta.outputs.head_sha }}
         GITHUB_REPOSITORY: ${{ github.repository }}
         REVIEW_CONTEXT: ${{ inputs.review_context }}
-        REVIEW_CONTEXT_MAX: "6000"
+        # Same budget as the Resolve step. Both sites must stay in lockstep.
+        REVIEW_CONTEXT_MAX: "12000"
         REVIEW_ROUND: ${{ steps.prev.outputs.round || '1' }}
         HONOR_PR_BODY_DECISIONS: ${{ inputs.honor_pr_body_decisions }}
         GITHUB_TOKEN: ""

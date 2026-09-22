@@ -60,8 +60,13 @@ fi
 # When head -c REVIEW_CONTEXT_MAX truncates the default context, trusted
 # instructions get cut mid-sentence.
 ctx_bytes="$(wc -c < "${ASSETS}/default-review-context.md" | tr -d ' ')"
-ctx_max="$(sed -n 's/.*REVIEW_CONTEXT_MAX: "\([0-9]*\)".*/\1/p' "${WORKFLOW}" | head -n 1)"
+ctx_maxes="$(sed -n 's/.*REVIEW_CONTEXT_MAX: "\([0-9]*\)".*/\1/p' "${WORKFLOW}")"
+ctx_max="$(printf '%s\n' "${ctx_maxes}" | head -n 1)"
+ctx_max_count="$(printf '%s\n' "${ctx_maxes}" | grep -c .)"
+ctx_max_unique="$(printf '%s\n' "${ctx_maxes}" | sort -u | grep -c .)"
 chk "REVIEW_CONTEXT_MAX is parseable" "$([ -n "${ctx_max}" ] && echo yes || echo no)" "yes"
+chk "REVIEW_CONTEXT_MAX is set on both steps" "${ctx_max_count}" "2"
+chk "REVIEW_CONTEXT_MAX sites agree" "${ctx_max_unique}" "1"
 chk "default context (${ctx_bytes}B) fits the budget (${ctx_max}B)" \
   "$([ "${ctx_bytes}" -le "${ctx_max}" ] && echo fits || echo overflow)" "fits"
 
