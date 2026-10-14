@@ -3,6 +3,8 @@
 # Uses the same marker and author check as post-review-comment.sh, taking the latest match.
 # Required env: GH_TOKEN, GH_REPO, PR_NUMBER, RUNNER_TEMP
 # Optional env: PREV_REVIEW_MAX (defaults to 8000 bytes), GITHUB_OUTPUT
+# Writes prev-review.md (findings line stripped) and, when the bot was the last
+# editor, prev-findings.json decoded from the embedded findings line.
 #
 # fail-open: losing the previous comment only costs continuity, which is no reason
 # to fail the whole review. On failure treat this as round 1 and emit a warning.
@@ -19,9 +21,11 @@ set -euo pipefail
 OWNER="${GH_REPO%%/*}"
 NAME="${GH_REPO##*/}"
 MARKER='<!-- cursor-cli-code-review -->'
+FINDINGS_LINE_RE='^<!-- cursor-cli-findings v1 [A-Za-z0-9+/=]* -->$'
 PREV_FILE="${RUNNER_TEMP}/prev-review.md"
+PREV_FINDINGS="${RUNNER_TEMP}/prev-findings.json"
 
-rm -f "${PREV_FILE}"
+rm -f "${PREV_FILE}" "${PREV_FINDINGS}"
 round=1
 
 emit_round() {
@@ -36,7 +40,7 @@ if ! pr_json="$(gh api graphql \
     repository(owner:$owner,name:$name){
       pullRequest(number:$n){
         comments(last:100){
-          nodes{ databaseId author{login} body }
+          nodes{ databaseId author{login} editor{login} body }
         }
       }
     }
@@ -53,6 +57,11 @@ prev_body="$(printf '%s\n' "${pr_json}" | jq -r --arg m "${MARKER}" '
   .data.repository.pullRequest.comments.nodes
   | map(select(.author.login == "github-actions" and (.body | startswith($m))))
   | if length == 0 then empty else (last | .body) end
+' 2>/dev/null || true)"
+prev_editor="$(printf '%s\n' "${pr_json}" | jq -r --arg m "${MARKER}" '
+  .data.repository.pullRequest.comments.nodes
+  | map(select(.author.login == "github-actions" and (.body | startswith($m))))
+  | if length == 0 then empty else (last | .editor.login // empty) end
 ' 2>/dev/null || true)"
 
 if [ -z "${prev_body}" ]; then
@@ -73,6 +82,24 @@ else
   round=2
 fi
 
+# The embedded findings only feed a continuity notice, so a comment edited by
+# someone other than the bot is still injected as text but its block is ignored.
+if [ -n "${prev_editor}" ] && [ "${prev_editor}" != "github-actions" ]; then
+  echo "::warning::The previous review comment was last edited by ${prev_editor}; its embedded findings are ignored"
+else
+  prev_line="$(printf '%s\n' "${prev_body}" | grep -E "${FINDINGS_LINE_RE}" | tail -n 1 || true)"
+  if [ -n "${prev_line}" ]; then
+    prev_b64="${prev_line#<!-- cursor-cli-findings v1 }"
+    prev_b64="${prev_b64% -->}"
+    if printf '%s' "${prev_b64}" | base64 -d 2>/dev/null | jq -e 'type == "object"' > /dev/null 2>&1; then
+      printf '%s' "${prev_b64}" | base64 -d > "${PREV_FINDINGS}"
+      echo "::notice::prev_findings=loaded"
+    else
+      echo "::warning::The previous review's embedded findings could not be decoded; continuity is not checked"
+    fi
+  fi
+fi
+
 # Drop the marker line, keep the body, then truncate by bytes so it does not eat
 # into the diff budget.
 # These two steps are deliberately not a single pipeline: when the body is nothing
@@ -80,7 +107,9 @@ fi
 # upstream an EPIPE. Under set -euo pipefail either one would fail this step,
 # which contradicts fail-open.
 raw_file="${PREV_FILE}.raw"
-printf '%s\n' "${prev_body}" | grep -v -F -x "${MARKER}" > "${raw_file}" || true
+printf '%s\n' "${prev_body}" \
+  | grep -v -F -x "${MARKER}" \
+  | grep -v -E "${FINDINGS_LINE_RE}" > "${raw_file}" || true
 head -c "${PREV_REVIEW_MAX}" "${raw_file}" > "${PREV_FILE}"
 
 if [ "$(wc -c < "${raw_file}")" -gt "${PREV_REVIEW_MAX}" ]; then

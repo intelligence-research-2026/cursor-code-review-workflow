@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Deterministic scrub of review.md before upload/post (literal secrets fail-closed; common shapes redacted).
+# Deterministic scrub of review.md before findings extraction, upload and post
+# (literal secrets fail-closed; common shapes redacted).
 # Required env: RUNNER_TEMP
 # Optional: CURSOR_API_KEY, RUNNER_GH_TOKEN
 set -euo pipefail
@@ -28,14 +29,6 @@ sed -E -i \
   -e 's/(postgres(ql)?|mysql|mongodb(\+srv)?|redis|amqp):\/\/[^[:space:]]+/[REDACTED_URI]/g' \
   "${review_file}"
 
-# A GitHub issue comment body caps out around 64KB, and Post still prepends the
-# marker and appends a footer. Overflowing makes the comment fail and the check
-# go red, so truncate after scrubbing and leave a note.
-REVIEW_MAX=61440 # 60 KiB
-review_bytes="$(wc -c < "${review_file}" | tr -d ' ')"
-if [ "${review_bytes}" -gt "${REVIEW_MAX}" ]; then
-  head -c "${REVIEW_MAX}" "${review_file}" > "${review_file}.trunc"
-  printf '\n\n[review truncated]\n' >> "${review_file}.trunc"
-  mv "${review_file}.trunc" "${review_file}"
-  echo "::warning::review.md exceeded ${REVIEW_MAX} bytes and was truncated so the comment can be posted"
-fi
+# Size capping happens in extract-findings.py, after the findings block has been
+# taken out, so truncation can never cut the block and the embedded line still fits
+# under the 64KB comment limit.
