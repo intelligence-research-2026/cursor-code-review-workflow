@@ -54,7 +54,7 @@ if ! pr_json="$(gh api graphql \
       pullRequest(number:$n){
         id
         comments(last:100){
-          nodes{ id databaseId author{login} body }
+          nodes{ id databaseId author{login} editor{login} body }
         }
       }
     }
@@ -77,10 +77,23 @@ EXISTING_DB_ID="$(printf '%s\n' "${pr_json}" | jq -r --arg m "${MARKER}" '
   | map(select(.author.login == "github-actions" and (.body | startswith($m))))
   | if length == 0 then empty else (last | .databaseId | tostring) end
 ')"
+EXISTING_EDITOR="$(printf '%s\n' "${pr_json}" | jq -r --arg m "${MARKER}" '
+  .data.repository.pullRequest.comments.nodes
+  | map(select(.author.login == "github-actions" and (.body | startswith($m))))
+  | if length == 0 then empty else (last | .editor.login // empty) end
+')"
 
 if [[ -z "${PR_NODE_ID}" || "${PR_NODE_ID}" == "null" ]]; then
   echo "::error::Could not resolve the PR node id (check PR_NUMBER=${PR_NUMBER})"
   exit 1
+fi
+
+# Consumers only trust a review comment whose last editor is the bot. Rewriting a
+# comment someone else edited would hide their edit and leave trust to however GitHub
+# reports the editor afterwards, so post a fresh one.
+if [[ -n "${EXISTING_ID}" && -n "${EXISTING_EDITOR}" && "${EXISTING_EDITOR}" != "github-actions" ]]; then
+  echo "::warning::Review comment #${EXISTING_DB_ID} was last edited by ${EXISTING_EDITOR}; posting a new comment instead of updating it"
+  EXISTING_ID=""
 fi
 
 if [[ -n "${EXISTING_ID}" ]]; then
