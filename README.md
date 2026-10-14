@@ -3,7 +3,7 @@
 **Cursor CLI Code Review** GitHub Action (restricted autonomy: the agent only writes `review.md`, and the Action posts the comment with `gh`).
 
 - [`action.yml`](action.yml) — the product itself (composite Action; this is what cross-repository calls use)
-- [`.github/scripts/`](.github/scripts/) — the executable implementation (`resolve-pr` / `install-cursor-cli` / `run-review` / `scrub-review` / `post-review-comment` plus `assets/`)
+- [`.github/scripts/`](.github/scripts/) — the executable implementation (`resolve-pr` / `install-cursor-cli` / `run-review` / `scrub-review` / `extract-findings` / `post-review-comment` plus `assets/`)
 - [`.github/workflows/code-review.yml`](.github/workflows/code-review.yml) — self-integration (`uses: ./` dogfooding)
 
 Callers always use **`uses: owner/repo@<COMMIT_SHA>`** (Action form). GitHub fetches the entire action repository into `github.action_path`, so the scripts are immediately available. The older reusable-workflow form (`uses: owner/repo/.github/workflows/….yml@SHA`) only pulled the YAML and then checked this repo out with the caller's `GITHUB_TOKEN`; it is deprecated and has been removed.
@@ -122,12 +122,52 @@ With `honor_pr_body_decisions: true`, items dispositioned as `skip` in the PR bo
 
 This repository's own dogfooding enables the flag, which holds only because of "single author + advisory + forks skipped". The repository is public, but external fork PRs get no write access and are already skipped by the caller `if`, so the premise still stands. **The moment an outside contributor gets write access or non-owner branches are accepted, dogfooding must set `honor_pr_body_decisions` back to `false`.**
 
+## Machine-readable findings
+
+The review comment is a single PR conversation comment, not inline review threads, so tooling cannot learn *what* to fix from GitHub's thread APIs. Each review therefore also carries its findings as data:
+
+1. The agent ends `review.md` with one fenced block tagged `cursor-review-findings` (still the only file it may write).
+2. After scrubbing, `extract-findings.py` removes the block from the visible review and validates it.
+3. On success the comment embeds one line, `<!-- cursor-cli-findings v1 <base64 of compact JSON> -->`, right above the footer.
+
+The JSON has this shape:
+
+```json
+{"schema": 1, "verdict": "request_changes", "findings": [
+  {"id": 1, "status": "open", "severity": "P1", "confidence": "high",
+   "path": "src/example.ts", "line": 42, "title": "One-line summary"}
+]}
+```
+
+| Field | Values |
+| --- | --- |
+| `verdict` | `approve` / `comment` / `request_changes`; must match the visible `- Verdict:` line |
+| `status` | `open` / `fixed` / `withdrawn` / `superseded`; previous findings keep their numbers |
+| `severity` | `P0` / `P1` / `P2` |
+| `line` | positive integer or `null` |
+
+The footer records the outcome as `findings=`:
+
+- `v1`: the block is embedded.
+- `absent`: the agent wrote no block.
+- `invalid:<reason>`: the block was rejected and not embedded. Reasons are `multiple_blocks`, `json`, `schema`, `verdict_mismatch`, `approve_with_blocking` (an open P0/P1 under an `approve` verdict), `path_not_in_diff` (an open finding on a file the PR does not change) and `too_large`.
+
+A rejected block never fails the review: the comment is still posted. Comments from releases before this feature have no `findings=` field.
+
+Consumers should trust the data only when all of these hold:
+
+- the comment author is `github-actions`;
+- its last editor (GraphQL `editor`) is empty or `github-actions`;
+- the footer `head=` equals the PR head they are judging.
+
+The Action itself never updates a comment someone else edited last; it posts a fresh one instead.
+
 ## Behavior summary
 
 1. GitHub places this action repository at `github.action_path` (it is public, so every caller can read it); the scripts are staged to `$RUNNER_TEMP/ccr/scripts`
-2. Resolve the PR (forks: dispatch fails, everything else skips) → validate the API Key → read back the previous review and round → check out the caller's PR head
+2. Resolve the PR (forks: dispatch fails, everything else skips) → validate the API Key → read back the previous review, round and embedded findings → check out the caller's PR head
 3. Verify and install the Cursor CLI → the agent writes nothing but `review.md`, under the allowlist
-4. Scrub secret shapes → upload the artifact → upsert the PR comment (footer carries `round=`)
+4. Scrub secret shapes → extract and validate the findings block, cap the size → upload the artifact → upsert the PR comment (footer carries `round=` and `findings=`)
 
 Local debugging: with `PR_NUMBER` / `GH_TOKEN` / `GH_REPO` and friends set, `resolve-pr.sh` can be run on its own; the full agent flow still needs `CURSOR_API_KEY` and an installed CLI.
 
@@ -137,6 +177,6 @@ Offline test (no network and no API Key required; a `gh` stub drives the real sc
 bash .github/scripts/test-review-assembly.sh
 ```
 
-It covers the placeholder substitution order (a review context must not forge the nonce or the round), `default-review-context.md` staying within `REVIEW_CONTEXT_MAX`, previous-comment selection and round increment, plus edge cases such as fail-open, a body left with nothing but the marker, and oversized truncation.
+It covers the placeholder substitution order (a review context must not forge the nonce or the round), `default-review-context.md` staying within `REVIEW_CONTEXT_MAX`, previous-comment selection and round increment, plus edge cases such as fail-open, a body left with nothing but the marker, and oversized truncation. It also drives `extract-findings.py` through every `findings=` outcome and `post-review-comment.sh` through the footer and the edited-comment fallback.
 
 Official reference: [Cursor CLI · GitHub Actions](https://cursor.com/docs/cli/github-actions).
