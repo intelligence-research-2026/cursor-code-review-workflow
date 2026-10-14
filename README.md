@@ -29,6 +29,8 @@ curl -fsSL https://cursor.com/install | sha256sum | cut -d' ' -f1
 
 \* The Action **does not** read the caller's `vars.*`. Setting the Variable without writing `with.installer_sha256` makes Install fail closed. The caller must pass the Variable (or a literal SHA) through `with:`.
 
+If Install fails with `computed checksum did NOT match`, the installer changed: recompute the hash and update the Variable. A repository-level Variable overrides an organization-level one of the same name, so a stale repository-level value keeps failing after the organization value is refreshed; update or delete it too.
+
 Optional: place `.github/review-context.md` in the caller repository (it is read from the **PR base**), or override it through the `review_context` input.
 
 Billing goes to the Cursor account that owns the API Key. This check is **advisory**; do not add it to branch protection required checks.
