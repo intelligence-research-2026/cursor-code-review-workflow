@@ -33,10 +33,17 @@ if [[ "${FINDINGS_STATUS}" == "v1" && ! -s "${FINDINGS_LINE_FILE}" ]]; then
   FINDINGS_STATUS="invalid:missing_line"
 fi
 
+# The only embed line in the comment is the one validated by extract-findings.py;
+# drop look-alikes from the review text (same pattern as FORGED_EMBED_RE there).
+FORGED_EMBED_RE='^[[:space:]]*<!--[[:space:]]*cursor-cli-findings\b.*-->[[:space:]]*$'
+REVIEW_BODY="${RUNNER_TEMP}/cursor-review.body.md"
+grep -v -E "${FORGED_EMBED_RE}" "${RUNNER_TEMP}/cursor-review.md" > "${REVIEW_BODY}" \
+  || [[ $? -eq 1 ]]
+
 {
   echo "${MARKER}"
   echo
-  cat "${RUNNER_TEMP}/cursor-review.md"
+  cat "${REVIEW_BODY}"
   echo
   if [[ "${FINDINGS_STATUS}" == "v1" ]]; then
     cat "${FINDINGS_LINE_FILE}"

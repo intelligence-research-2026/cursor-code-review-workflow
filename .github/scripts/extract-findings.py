@@ -13,7 +13,7 @@ Required env: RUNNER_TEMP
 Optional env: GITHUB_OUTPUT, REVIEW_MAX (defaults to 61440 bytes)
 Inputs:  $RUNNER_TEMP/cursor-review.md, $RUNNER_TEMP/pr-files.txt,
          $RUNNER_TEMP/prev-findings.json
-Outputs: $RUNNER_TEMP/cursor-review.md (block removed, size-capped),
+Outputs: $RUNNER_TEMP/cursor-review.md (block and look-alike embed lines removed, size-capped),
          $RUNNER_TEMP/cursor-review-raw.md (scrubbed original, for the artifact),
          $RUNNER_TEMP/cursor-findings.json and cursor-findings.line (only for v1),
          step output status=v1|absent|invalid:<reason>
@@ -37,6 +37,10 @@ FIELDS = {"id", "status", "severity", "confidence", "path", "line", "title"}
 
 FENCE_RE = re.compile(r"^ {0,3}(`{3,}|~{3,})\s*([^\s`]*)\s*$")
 VERDICT_RE = re.compile(r"^\s*[-*]*\s*\**\s*Verdict\**\s*:\s*(.*)$")
+# Any whole line shaped like the embed. Only this step may produce that line, so
+# the agent's copies are dropped; inline mentions inside prose are left alone.
+# post-review-comment.sh applies the same pattern; keep the two in sync.
+FORGED_EMBED_RE = re.compile(r"^\s*<!--\s*cursor-cli-findings\b.*-->\s*$")
 
 
 class Invalid(Exception):
@@ -211,6 +215,10 @@ def main():
     raw = review_path.read_text(encoding="utf-8", errors="replace")
     raw_path.write_text(raw, encoding="utf-8")
     visible, blocks = split_blocks(raw)
+    forged = sum(1 for line in visible if FORGED_EMBED_RE.match(line))
+    if forged:
+        print("::warning::dropped %d line(s) shaped like the embedded findings line" % forged)
+        visible = [line for line in visible if not FORGED_EMBED_RE.match(line)]
 
     embed_line = ""
     if not blocks:

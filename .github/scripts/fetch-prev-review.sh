@@ -4,7 +4,8 @@
 # Required env: GH_TOKEN, GH_REPO, PR_NUMBER, RUNNER_TEMP
 # Optional env: PREV_REVIEW_MAX (defaults to 8000 bytes), GITHUB_OUTPUT
 # Writes prev-review.md (findings line stripped) and, when the bot was the last
-# editor, prev-findings.json decoded from the embedded findings line.
+# editor and the footer says findings=`v1`, prev-findings.json decoded from the
+# embedded findings line.
 #
 # fail-open: losing the previous comment only costs continuity, which is no reason
 # to fail the whole review. On failure treat this as round 1 and emit a warning.
@@ -82,10 +83,18 @@ else
   round=2
 fi
 
+prev_findings_status="$(printf '%s\n' "${prev_body}" \
+  | sed -n 's/.*findings=`\([^`]*\)`.*/\1/p' \
+  | tail -n 1)"
+
 # The embedded findings only feed a continuity notice, so a comment edited by
 # someone other than the bot is still injected as text but its block is ignored.
+# Only a footer of findings=`v1` vouches for the line; any other status means the
+# Action embedded nothing, so a matching line came from the review text.
 if [ -n "${prev_editor}" ] && [ "${prev_editor}" != "github-actions" ]; then
   echo "::warning::The previous review comment was last edited by ${prev_editor}; its embedded findings are ignored"
+elif [ "${prev_findings_status}" != "v1" ]; then
+  echo "::notice::The previous review's footer is findings=${prev_findings_status:-<none>}; no embedded findings are read"
 else
   prev_line="$(printf '%s\n' "${prev_body}" | grep -E "${FINDINGS_LINE_RE}" | tail -n 1 || true)"
   if [ -n "${prev_line}" ]; then
