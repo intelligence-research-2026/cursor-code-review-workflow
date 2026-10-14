@@ -76,4 +76,31 @@ Output format for review.md:
 - `## Convergence`: if no P0/P1 finding is open, say plainly that the PR can merge
   and that everything remaining is an accepted residual risk. Otherwise name the
   P0/P1 items that still block.
+- Last, exactly one fenced code block whose info string is `cursor-review-findings`
+  (see below). Nothing after it.
 Keep it concise; skip nitpicks.
+
+Numbering: new findings continue after the highest number any previous round used,
+so a number always means the same finding across rounds.
+
+Machine-readable findings block (mandatory, read by deterministic tooling):
+
+```cursor-review-findings
+{"schema": 1, "verdict": "request_changes", "findings": [
+  {"id": 1, "status": "open", "severity": "P1", "confidence": "high",
+   "path": "src/example.ts", "line": 42, "title": "One-line summary"}
+]}
+```
+
+- The block holds a single JSON object and nothing else: no comments, no prose.
+- `verdict` is `approve`, `comment` or `request_changes` and must match the
+  `- Verdict:` line.
+- List every finding from the Findings section with `"status": "open"`, and every
+  item from the previous-findings section with its disposition: `Still open` is
+  `open`, otherwise `fixed`, `withdrawn` or `superseded`. Keep the same numbers.
+- `severity` is `P0`, `P1` or `P2`; `confidence` is `high` or `medium`.
+- `path` is the repository-relative path exactly as it appears in the diff; `line`
+  is a line number in the PR head, or `null` when no single line applies.
+- `title` is one line, at most 200 characters, in the same language as the review.
+- With nothing to report, write `"findings": []`.
+- If any P0/P1 finding is `open`, `verdict` must not be `approve`.

@@ -209,12 +209,23 @@ runs:
       run: bash "${RUNNER_TEMP}/ccr/scripts/scrub-review.sh"
       shell: bash
 
+    # Runs after scrubbing so the block is redacted like the rest of the review.
+    # Content problems only downgrade the footer to findings=invalid:<reason>.
+    - name: Validate findings
+      id: findings
+      if: success() && steps.meta.outputs.skip != 'true'
+      run: python3 "${RUNNER_TEMP}/ccr/scripts/extract-findings.py"
+      shell: bash
+
     - name: Upload review.md
       if: success() && steps.meta.outputs.skip != 'true'
       uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
       with:
         name: cursor-code-review-${{ inputs.pr_number }}
-        path: ${{ runner.temp }}/cursor-review.md
+        path: |
+          ${{ runner.temp }}/cursor-review.md
+          ${{ runner.temp }}/cursor-review-raw.md
+          ${{ runner.temp }}/cursor-findings.json
         if-no-files-found: error
 
     - name: Post review comment
@@ -226,5 +237,6 @@ runs:
         HEAD_SHA: ${{ steps.meta.outputs.head_sha }}
         PR_NUMBER: ${{ inputs.pr_number }}
         REVIEW_ROUND: ${{ steps.prev.outputs.round || '1' }}
+        FINDINGS_STATUS: ${{ steps.findings.outputs.status }}
       run: bash "${RUNNER_TEMP}/ccr/scripts/post-review-comment.sh"
       shell: bash
