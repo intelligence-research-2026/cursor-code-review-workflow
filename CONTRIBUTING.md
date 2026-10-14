@@ -9,15 +9,14 @@ ranges.
 
 ## Change flow
 
-1. Branch from `main` as `feat/<short-topic>`. There is no `develop` branch and no
-   release branch.
+1. Branch from `develop` (the default branch) as `feat/<short-topic>`.
 2. Run the offline test locally:
 
    ```bash
    bash .github/scripts/test-review-assembly.sh
    ```
 
-3. Open a pull request into `main`. Direct pushes to `main` are blocked.
+3. Open a pull request into `develop`, which rejects force pushes and deletion.
 4. Two checks run on the pull request: the English-only guard and this
    repository's own Cursor Code Review (dogfooding through `uses: ./`).
 5. A maintainer reviews and merges. Merges are always manual; auto-merge is not
