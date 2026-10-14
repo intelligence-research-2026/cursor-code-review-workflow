@@ -152,15 +152,16 @@ The footer records the outcome as `findings=`:
 
 - `v1`: the block is embedded.
 - `absent`: the agent wrote no block.
-- `invalid:<reason>`: the block was rejected and not embedded. Reasons are `multiple_blocks`, `json`, `schema`, `verdict_mismatch`, `approve_with_blocking` (an open P0/P1 under an `approve` verdict), `path_not_in_diff` (an open finding on a file the PR does not change) and `too_large`.
+- `invalid:<reason>`: the block was rejected and not embedded. Reasons are `multiple_blocks`, `json`, `schema`, `verdict_mismatch`, `approve_with_blocking` (an open P0/P1 under an `approve` verdict), `path_not_in_diff` (an open finding on a file the PR does not change) and `too_large`. The posting step adds `missing_line` (the step reported `v1` but wrote no line) and `unknown` (a status of unexpected shape); a status it does not recognize at all becomes a bare `unknown`.
 
-A rejected block never fails the review: the comment is still posted. Comments from releases before this feature have no `findings=` field.
+A rejected block never fails the review: the comment is still posted. Comments from releases before this feature have no `findings=` field. Any other whole line in the review shaped like the embed is dropped before posting, so the agent cannot plant a second one.
 
 Consumers should trust the data only when all of these hold:
 
 - the comment author is `github-actions`;
 - its last editor (GraphQL `editor`) is empty or `github-actions`;
-- the footer `head=` equals the PR head they are judging.
+- the footer `head=` equals the PR head they are judging;
+- the footer records `findings=v1`; with any other value the Action embedded nothing, so ignore any line that looks like the embed.
 
 The Action itself never updates a comment someone else edited last; it posts a fresh one instead.
 
