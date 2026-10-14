@@ -32,9 +32,10 @@ rather than stylistic:
 
 ## Change flow
 
-`feat/*` branch, then a pull request into `main`. There is no `develop` branch and
-no release branch. Third-party actions are pinned to a commit SHA with a trailing
-version comment.
+Feature branch, then a pull request into `develop` (the default branch). A release
+merges `release/vX.Y.Z` into `main`, tags `vX.Y.Z` on that merge, and merges `main`
+back into `develop`. Callers pin the tagged commit SHA. Third-party actions are
+pinned to a commit SHA with a trailing version comment.
 
 Before opening a pull request, run the offline test:
 

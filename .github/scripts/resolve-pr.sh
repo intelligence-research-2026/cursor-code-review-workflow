@@ -104,6 +104,9 @@ truncate_untrusted() {
 echo "$meta" | jq -r .title > /tmp/pr-title.txt
 echo "$meta" | jq -r '.body // ""' > /tmp/pr-body.txt
 gh pr diff --allow-escape-sequences "$PR_NUMBER" > /tmp/pr.diff
+# The full list of changed paths, independent of diff truncation: the findings
+# validator only accepts open findings that point at one of these files.
+gh pr diff --name-only "$PR_NUMBER" > "${RUNNER_TEMP}/pr-files.txt"
 truncate_untrusted /tmp/pr-title.txt 1000 title
 truncate_untrusted /tmp/pr-body.txt 20000 body
 truncate_untrusted /tmp/pr.diff 60000 diff
