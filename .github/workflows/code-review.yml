@@ -58,7 +58,6 @@ jobs:
           pr_number: ${{ github.event.pull_request.number || inputs.pr_number }}
           caller_event: ${{ github.event_name }}
           review_context: ${{ inputs.review_context }}
-          installer_sha256: ${{ vars.CURSOR_INSTALLER_SHA256 }}
           model: ${{ vars.CURSOR_MODEL || 'auto' }}
           honor_pr_body_decisions: true
           cursor_api_key: ${{ secrets.CURSOR_API_KEY }}

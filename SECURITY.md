@@ -33,14 +33,15 @@ workflow, and the impact you expect.
 - Rule files on the PR head (`.cursor`, `.cursorrules`, `AGENTS.md`) are deleted
   before the agent starts, so a pull request cannot supply its own "trusted"
   rules.
-- The Cursor CLI install script is verified against a caller-supplied SHA256 and
-  fails closed when that input is empty.
+- The Install step downloads the current Cursor install script from
+  https://cursor.com/install and runs it. `installer_sha256` is ignored.
+  `agent_sha256`, when set, still verifies the CLI binary after install.
 
 ## Known residual risks
 
 These are deliberate, reviewed trade-offs and are documented in
-[`.github/review-context.md`](.github/review-context.md): the installer checksum
-covers the bootstrap script rather than the whole supply chain, `agent_sha256` is
-optional, scrubbing only catches literal secrets and common token shapes, and
+[`.github/review-context.md`](.github/review-context.md): the install step runs the
+current bootstrap script with no checksum, `agent_sha256` is optional, scrubbing
+only catches literal secrets and common token shapes, and
 `Shell(commandBase)` matches the first token so an allowlisted search command may
 still take arguments.

@@ -17,19 +17,12 @@ Configure these in the **caller repository**:
 | Name | Type | Required | Notes |
 |------|------|----------|-------|
 | `CURSOR_API_KEY` | Secret | yes | API Key issued by the [Cursor Dashboard](https://cursor.com/dashboard); passed through `with.cursor_api_key` |
-| `CURSOR_INSTALLER_SHA256` | Variable | yes* | Bare SHA256 (see the command below); the caller **must** set `with.installer_sha256: ${{ vars.CURSOR_INSTALLER_SHA256 }}` because the Action never reads Variables itself |
 | `CURSOR_MODEL` | Variable | no | Model slug; defaults to `auto`; callers should set `with.model: ${{ vars.CURSOR_MODEL || 'auto' }}` |
 | `CURSOR_AGENT_SHA256` | Variable | no | Verifies the CLI binary after install; callers may set `with.agent_sha256: ${{ vars.CURSOR_AGENT_SHA256 }}` |
 
-Getting the installer checksum (**hash only, no filename column**):
+Install always downloads the current script from `https://cursor.com/install` and runs it. `installer_sha256` is accepted and ignored, so a caller that still passes `vars.CURSOR_INSTALLER_SHA256` does not need a workflow edit when it bumps the pin. `CURSOR_INSTALLER_SHA256` is no longer required.
 
-```bash
-curl -fsSL https://cursor.com/install | sha256sum | cut -d' ' -f1
-```
-
-\* The Action **does not** read the caller's `vars.*`. Setting the Variable without writing `with.installer_sha256` makes Install fail closed. The caller must pass the Variable (or a literal SHA) through `with:`.
-
-If Install fails with `computed checksum did NOT match`, the installer changed: recompute the hash and update the Variable. A repository-level Variable overrides an organization-level one of the same name, so a stale repository-level value keeps failing after the organization value is refreshed; update or delete it too.
+The Action **does not** read the caller's `vars.*` or `secrets.*`. The caller resolves them and passes the values through `with:`.
 
 Optional: place `.github/review-context.md` in the caller repository (it is read from the **PR base**), or override it through the `review_context` input.
 
@@ -78,7 +71,6 @@ jobs:
         with:
           pr_number: ${{ github.event.pull_request.number || inputs.pr_number }}
           caller_event: ${{ github.event_name }}
-          installer_sha256: ${{ vars.CURSOR_INSTALLER_SHA256 }}
           model: ${{ vars.CURSOR_MODEL || 'auto' }}
           cursor_api_key: ${{ secrets.CURSOR_API_KEY }}
 ```
@@ -97,7 +89,7 @@ This repository uses **`uses: ./`** (which requires `actions/checkout` first) so
 | `caller_event` | The caller's `github.event_name`; on forks only `pull_request` may skip, everything else is fail-closed |
 | `review_context` | Overrides the review priorities |
 | `review_context_file` | Defaults to `.github/review-context.md` |
-| `installer_sha256` | **Must be passed by the caller through `with:`** (typically `installer_sha256: ${{ vars.CURSOR_INSTALLER_SHA256 }}`); empty makes Install fail closed |
+| `installer_sha256` | Ignored. Install always fetches the current script from `https://cursor.com/install`. Callers may keep passing it |
 | `model` | Passed by the caller through `with:`; empty defaults to `auto` |
 | `agent_sha256` | Passed by the caller through `with:`; empty only emits a notice |
 | `honor_pr_body_decisions` | Defaults to `false`; see "Multi-round convergence" below |
