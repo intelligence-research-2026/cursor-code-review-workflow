@@ -14,6 +14,7 @@ ranges.
 
    ```bash
    bash .github/scripts/test-review-assembly.sh
+   bash .github/scripts/test-install-cursor-cli.sh
    ```
 
 3. Open a pull request into `develop`, which rejects force pushes and deletion.
@@ -42,6 +43,7 @@ a mutable `@v*` tag.
 
 The items listed under "Architecture invariants" in
 [`.github/review-context.md`](.github/review-context.md) are trust boundaries, not
-style preferences. Weakening the allowlist permissions, the scrubbing steps, the
-fork skip or the installer checksum fail-closed behavior needs an explicit reason
-in the pull request description.
+style preferences. Weakening the allowlist permissions, the scrubbing steps or the
+fork skip needs an explicit reason in the pull request description. The installer
+bootstrap is intentionally unpinned; reintroducing a required installer checksum
+needs the same kind of reason.

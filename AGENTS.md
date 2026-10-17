@@ -27,8 +27,9 @@ rather than stylistic:
   binding review guidance belongs in `.github/review-context.md` on the base
   branch.
 - Never add `--force` or `--yolo` to the agent invocation, and never relax the
-  installer checksum, the scrubbing steps or the fork skip without an explicit,
-  reviewed reason.
+  scrubbing steps or the fork skip without an explicit, reviewed reason. The
+  installer bootstrap is unpinned on purpose; do not reintroduce a required
+  installer checksum without that same decision.
 
 ## Change flow
 
@@ -41,4 +42,5 @@ Before opening a pull request, run the offline test:
 
 ```bash
 bash .github/scripts/test-review-assembly.sh
+bash .github/scripts/test-install-cursor-cli.sh
 ```
