@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# Install Cursor CLI with installer SHA fail-closed; optional agent binary SHA; link bundled rg.
-# Required env: CURSOR_INSTALLER_SHA256, GITHUB_PATH
+# Install the current Cursor CLI; optional agent binary SHA; link bundled rg.
+# Required env: GITHUB_PATH
 # Optional: CURSOR_AGENT_SHA256
+# CURSOR_INSTALLER_SHA256 is ignored. Install always fetches https://cursor.com/install.
 set -euo pipefail
 
-: "${CURSOR_INSTALLER_SHA256:=}"
 : "${CURSOR_AGENT_SHA256:=}"
 : "${GITHUB_PATH:?}"
 
@@ -17,14 +17,9 @@ require_sha256() {
   fi
   printf '%s' "${raw}"
 }
-if [ -z "${CURSOR_INSTALLER_SHA256}" ]; then
-  echo "::error::Missing installer SHA (input installer_sha256 or Variables.CURSOR_INSTALLER_SHA256); refusing to run an unverified install script."
-  exit 1
-fi
-CURSOR_INSTALLER_SHA256="$(require_sha256 "${CURSOR_INSTALLER_SHA256}" "installer_sha256")"
+
 curl -fsSLo /tmp/cursor-install.sh https://cursor.com/install
-echo "::notice::cursor_installer_sha256=enabled"
-printf '%s  %s\n' "${CURSOR_INSTALLER_SHA256}" /tmp/cursor-install.sh | sha256sum -c -
+echo "::notice::cursor_installer=latest url=https://cursor.com/install"
 bash /tmp/cursor-install.sh
 echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 

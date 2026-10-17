@@ -26,7 +26,6 @@
 #           with:
 #             pr_number: ${{ github.event.pull_request.number || inputs.pr_number }}
 #             caller_event: ${{ github.event_name }}
-#             installer_sha256: ${{ vars.CURSOR_INSTALLER_SHA256 }}
 #             cursor_api_key: ${{ secrets.CURSOR_API_KEY }}
 #
 # concurrency / timeout-minutes / permissions / runs-on are the caller job's responsibility.
@@ -51,7 +50,7 @@ inputs:
     required: false
     default: ".github/review-context.md"
   installer_sha256:
-    description: "SHA256 of the Cursor install script; empty makes the Install step fail-closed (callers should pass vars.CURSOR_INSTALLER_SHA256)"
+    description: "Ignored. Install always downloads the current script from https://cursor.com/install. Callers may keep passing this input."
     required: false
     default: ""
   model:
@@ -150,7 +149,6 @@ runs:
     - name: Install Cursor CLI
       if: success() && steps.meta.outputs.skip != 'true'
       env:
-        CURSOR_INSTALLER_SHA256: ${{ inputs.installer_sha256 }}
         CURSOR_AGENT_SHA256: ${{ inputs.agent_sha256 }}
       run: bash "${RUNNER_TEMP}/ccr/scripts/install-cursor-cli.sh"
       shell: bash
