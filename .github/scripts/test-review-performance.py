@@ -25,6 +25,50 @@ def event(call_id, subtype, tool="readToolCall", args=None, result=None):
 
 
 class PerformanceTest(unittest.TestCase):
+    def test_live_cli_envelopes_with_metadata_and_thinking(self):
+        # Reproduce shapes/counts from run 40444807957 using synthetic bodies.
+        # Do not save source, arguments or thinking text from a real review.
+        m = module.Metrics()
+        for subtype, count in (("delta", 994), ("completed", 8)):
+            for _ in range(count):
+                m.event({"type": "thinking", "subtype": subtype,
+                         "text": "SECRET_THINKING", "timestamp_ms": 100}, 1)
+        for tool, count in (("readToolCall", 22), ("grepToolCall", 2),
+                            ("editToolCall", 1), ("getMcpToolsToolCall", 1)):
+            for i in range(count):
+                for subtype, now in (("started", 2), ("completed", 3)):
+                    sample = event(f"{tool}-{i}", subtype, tool)
+                    sample["tool_call"].update(hookAdditionalContexts=[],
+                                               toolCallId="SECRET_ID", startedAtMs=100)
+                    if subtype == "completed":
+                        sample["tool_call"]["completedAtMs"] = 101
+                    m.event(sample, now)
+        m.event({"type": "result", "subtype": "success"}, 4)
+        report = m.report(4, 0)
+        self.assertEqual(report["classified_tool_calls"], 26)
+        self.assertEqual(report["observed_tool_calls"], 26)
+        self.assertEqual(report["unknown_events"], 0)
+        self.assertTrue(report["classification_complete"])
+        self.assertEqual(report["recognized_thinking_events"], {"delta": 994, "completed": 8})
+        self.assertEqual(report["tools"]["edit"]["completed"], 1)
+        self.assertEqual(report["tools"]["tool_discovery"]["completed"], 1)
+        self.assertEqual(report["unique_read_files"], 1)
+        self.assertEqual(report["repeated_read_requests"], 21)
+        # Recognizing a search does not establish its result count.
+        self.assertIsNone(report["explicit_zero_match_searches"])
+        self.assertIsNone(report["observed_read_content_bytes"])
+        self.assertNotIn("SECRET_", json.dumps(report))
+
+    def test_future_thinking_subtype_remains_unknown(self):
+        m = module.Metrics()
+        m.event({"type": "thinking", "subtype": "future", "text": "SECRET_BODY"}, 1)
+        m.event({"type": "result"}, 2)
+        report = m.report(2, 0)
+        self.assertEqual(report["unknown_events"], 1)
+        self.assertFalse(report["classification_complete"])
+        self.assertIsNone(report["unique_read_files"])
+        self.assertNotIn("SECRET_BODY", json.dumps(report))
+
     def test_unknown_calls_are_unavailable_not_zero(self):
         m = module.Metrics()
         m.event(event("a", "started", "futureToolCall"), 1)

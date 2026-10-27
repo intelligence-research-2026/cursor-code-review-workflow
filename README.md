@@ -228,6 +228,15 @@ overflow is counted. CLI version is taken from the resolved install directory
 when its name matches the installer's date/hash format; no extra agent call is
 made. These diagnostics identify parser gaps, not evidence to shorten a review.
 
+Compatibility with CLI `2026.10.22-27dcf5f` was checked using live event shapes.
+Tool payloads can include `hookAdditionalContexts`, `toolCallId`, `startedAtMs`
+and `completedAtMs` metadata. `editToolCall` and `getMcpToolsToolCall` are
+classified as edit and tool discovery. `thinking` delta/completed envelopes are
+counted separately without inspecting their text; future subtypes stay unknown.
+These timestamps and event counts do not establish inference duration. Missing
+read content or search match-count fields remain missing observations even when
+every tool is classified.
+
 Parsing is capped at 1 MiB per record and 10000 tracked calls; larger records are
 drained and counted as missing observations, never sent back to the agent.
 Parser/report failures do not replace the agent exit status or rerun the model.

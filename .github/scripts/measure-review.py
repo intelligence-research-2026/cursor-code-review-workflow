@@ -27,6 +27,7 @@ TOOL_KINDS = {
     "writeToolCall": "write", "Write": "write",
     "grepToolCall": "search", "globToolCall": "search",
     "Grep": "search", "Glob": "search", "shellToolCall": "shell",
+    "editToolCall": "edit", "getMcpToolsToolCall": "tool_discovery",
 }
 
 
@@ -84,6 +85,7 @@ class Metrics:
         self.diagnostic_overflow = 0
         self.version = None
         self.read_path_events = self.read_content_events = self.search_result_events = 0
+        self.thinking_events = collections.Counter()
 
     def diagnose(self, event):
         def fields(obj):
@@ -159,6 +161,11 @@ class Metrics:
             return
         if event_type in ("user", "assistant", "system"):
             return  # Never persist text, including the terminal result text.
+        if event_type == "thinking" and event.get("subtype") in ("delta", "completed"):
+            # Observed in CLI 2026.10.22-27dcf5f. Inspect the envelope only;
+            # never read its text or infer model runtime from event timestamps.
+            self.thinking_events[event["subtype"]] += 1
+            return
         if event_type != "tool_call":
             self.unknown += 1
             return
@@ -231,6 +238,7 @@ class Metrics:
             "classified_tool_calls": classified, "observed_tool_calls": total,
             "tool_classification_ratio": round(classified / total, 4) if total else None,
             "observed_events": self.events,
+            "recognized_thinking_events": dict(self.thinking_events),
             "unknown_event_ratio": round(self.unknown / self.events, 4) if self.events else None,
             "classification_complete": complete,
             "unique_read_files": len(self.files) if reads_available else None,
