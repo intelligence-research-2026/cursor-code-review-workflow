@@ -36,6 +36,10 @@ else
   exit 1
 fi
 
+# Save pinned, inert evidence BEFORE removing any PR-head instruction files.
+# The agent may read these copies as data but must never load them as rules.
+review_inputs_index="$(python3 "${SCRIPTS_DIR}/prepare-review-inputs.py")"
+
 # Rule and instruction files inside head are untrusted too, yet the CLI would load
 # them automatically as "trusted rules" and bypass the nonce delimiters below.
 # Remove them before running the agent and keep only the cli.json that CI writes.
@@ -104,6 +108,7 @@ else
   pr_body_decisions_rule=''
 fi
 
+REVIEW_INPUTS_INDEX="$review_inputs_index" \
 REVIEW_PRIORITIES="$review_priorities" UNTRUSTED_NONCE="$untrusted_nonce" \
 REVIEW_ROUND="$REVIEW_ROUND" PR_BODY_DECISIONS_RULE="$pr_body_decisions_rule" python3 - <<'PY'
 import os
@@ -117,6 +122,7 @@ text = prompt_path.read_text()
 text = text.replace("__UNTRUSTED_NONCE__", os.environ["UNTRUSTED_NONCE"])
 text = text.replace("__REVIEW_ROUND__", os.environ["REVIEW_ROUND"])
 text = text.replace("__PR_BODY_DECISIONS_RULE__", os.environ["PR_BODY_DECISIONS_RULE"])
+text = text.replace("__REVIEW_INPUTS_INDEX__", os.environ["REVIEW_INPUTS_INDEX"])
 text = text.replace("__REVIEW_PRIORITIES__", os.environ["REVIEW_PRIORITIES"])
 prompt_path.write_text(text)
 PY
@@ -165,12 +171,43 @@ fi
 # Never add --force / --yolo: that degrades into "allow everything except deny" and
 # defeats the allowlist.
 agent_log="${RUNNER_TEMP}/agent-stdout.log"
-set +e
-"$AGENT_BIN" -p --trust --output-format text \
-  --model "$CURSOR_MODEL" \
-  < /tmp/review-prompt.txt 2>&1 | tee "${agent_log}"
-agent_ec=${PIPESTATUS[0]}
-set -e
+review_started=${SECONDS}
+echo "::notice::review_agent_started model=${CURSOR_MODEL} round=${REVIEW_ROUND} prompt_bytes=$(wc -c < /tmp/review-prompt.txt)"
+# Text output only arrives at completion. Emit elapsed time without logging
+# prompts, intermediate model output or credentials.
+python3 -u -c '
+import time
+started = time.monotonic()
+while True:
+    time.sleep(30)
+    print(f"::notice::review_agent_running elapsed_seconds={int(time.monotonic() - started)}")
+' &
+heartbeat_pid=$!
+stop_heartbeat() {
+  kill "${heartbeat_pid}" 2>/dev/null || true
+  wait "${heartbeat_pid}" 2>/dev/null || true
+}
+trap stop_heartbeat EXIT
+if python3 "${SCRIPTS_DIR}/measure-review.py" --check >/dev/null 2>&1; then
+  set +e
+  python3 "${SCRIPTS_DIR}/measure-review.py" -- \
+    "$AGENT_BIN" -p --trust --output-format stream-json --model "$CURSOR_MODEL" \
+    < /tmp/review-prompt.txt
+  agent_ec=$?
+  set -e
+  # Raw NDJSON includes prompts and tool results. Never tee or upload it.
+  printf 'Agent exit code: %s. Raw event bodies were discarded.\n' "${agent_ec}" > "${agent_log}"
+else
+  echo "::warning::Performance collector unavailable; using the original text invocation"
+  set +e
+  "$AGENT_BIN" -p --trust --output-format text --model "$CURSOR_MODEL" \
+    < /tmp/review-prompt.txt 2>&1 | tee "${agent_log}"
+  agent_ec=${PIPESTATUS[0]}
+  set -e
+fi
+stop_heartbeat
+trap - EXIT
+echo "::notice::review_agent_finished elapsed_seconds=$((SECONDS - review_started)) exit_code=${agent_ec}"
 
 if [ "${agent_ec}" -ne 0 ]; then
   echo "::error::cursor agent exited with ${agent_ec} (see the agent-stdout.log artifact)"

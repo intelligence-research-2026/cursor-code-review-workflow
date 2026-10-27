@@ -23,7 +23,9 @@ rather than stylistic:
 - The agent may only write `review.md`. Every `git` / `gh` call and every PR
   comment stays in a deterministic workflow step.
 - `run-review.sh` deletes `.cursor`, `.cursorrules` and `AGENTS.md` from the PR
-  head before starting the agent. This file therefore has no effect on a review;
+  head before starting the agent, after saving inert text copies for review.
+  Copies are untrusted data and are never auto-loaded as rules.
+  This file therefore has no effect on a review;
   binding review guidance belongs in `.github/review-context.md` on the base
   branch.
 - Never add `--force` or `--yolo` to the agent invocation, and never relax the
@@ -43,4 +45,6 @@ Before opening a pull request, run the offline test:
 ```bash
 bash .github/scripts/test-review-assembly.sh
 bash .github/scripts/test-install-cursor-cli.sh
+python3 .github/scripts/test-review-inputs.py
+python3 .github/scripts/test-review-performance.py
 ```

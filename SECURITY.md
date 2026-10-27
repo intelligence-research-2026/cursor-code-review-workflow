@@ -32,12 +32,25 @@ workflow, and the impact you expect.
   same way, because anyone with write access can edit it.
 - Rule files on the PR head (`.cursor`, `.cursorrules`, `AGENTS.md`) are deleted
   before the agent starts, so a pull request cannot supply its own "trusted"
-  rules.
+  rules. Before deletion, regular tracked files allowed by the existing Read
+  permissions are saved as inert `.txt` evidence. Symlinks are never followed;
+  denied, binary or oversized head snapshots are explicitly marked unavailable.
+  These copies and the complete diff parts remain untrusted review data.
 - The Install step downloads the current Cursor install script from
   https://cursor.com/install and runs it. `installer_sha256` is ignored.
   `agent_sha256`, when set, still verifies the CLI binary after install.
 
 ## Known residual risks
+
+Performance collection reads structured CLI events in memory and persists only
+aggregate counters, timings, a validated CLI model label and bounded event-shape
+diagnostics. Diagnostics retain only sanitized structural field names and short
+type/subtype/tool-name identifiers; arguments, results and messages are not
+traversed. Raw prompts, file paths, arguments, source, results and stderr are not
+retained. Call IDs and read identities are salted per run and discarded with the
+collector. The CLI version is derived from the validated install directory name,
+without saving its path or making another agent invocation. The performance artifact does
+not contain raw agent logs; its upload is best-effort and does not gate review.
 
 These are deliberate, reviewed trade-offs and are documented in
 [`.github/review-context.md`](.github/review-context.md): the install step runs the

@@ -157,7 +157,93 @@ Consumers should trust the data only when all of these hold:
 
 The Action itself never updates a comment someone else edited last; it posts a fresh one instead.
 
+## Large diffs and removed rule files
+
+Before deleting PR-head instruction files, the Action prepares a fresh
+`ccr-review-data-*/index.txt` directory inside the checkout. The index lists every
+changed file with complete diff parts (at most 48000 UTF-8 bytes per part), plus
+inert text snapshots of readable regular tracked files under `.cursor`,
+`.cursorrules` and root `AGENTS.md`. Source paths remain in the index; generated
+filenames are ordinary `.txt` files so the CLI cannot auto-load them as rules.
+Snapshots use the existing Read allow/deny permissions and do not follow
+symlinks. Binary files and head snapshots over 2 MiB are marked unavailable.
+
+Diffs are generated from the resolved base/head commit IDs after checkout, so
+a push during setup cannot mix revisions. Only the inline preview is capped at
+60000 bytes; the complete per-file parts stay available to the agent. The prompt
+directs the agent to the index first and forbids searching the host for deleted
+originals. Each entry records whether its inline preview is complete, partial or
+omitted, so the agent can fill the gaps without re-reading every diff. Any
+remaining coverage gap must be stated in the review.
+
+The agent logs its start, elapsed time every 30 seconds, and completion time.
+These timing messages do not include prompts or intermediate model output.
+Manual reruns still start a new review: the same head may be reviewed with a
+different base, model or `review_context`, so a head-SHA-only cache is unsafe.
+
 ## Behavior summary
+
+### Performance observations
+
+The print-mode invocation uses `--output-format stream-json` following the
+[Cursor output format reference](https://cursor.com/docs/cli/reference/output-format).
+Model selection, prompt, permissions, review output and analysis time are not
+changed. `measure-review.py` consumes the stream without writing raw events to
+disk or logs. User/assistant text, tool arguments, file paths and tool results
+are discarded; per-run salted digests are used only in memory to count repeated
+read requests. The terminal text is also discarded: `review.md` remains the
+authoritative review output. Stderr is counted as unparseable records, not saved.
+
+The Actions Summary and `cursor-review-performance-<PR>` artifact contain:
+
+- elapsed time, time to the first event and the model name reported by CLI init;
+- fixed base/head revisions and the configured model for comparing runs;
+- tool starts/completions, summed durations and the union of completed tool
+  intervals (parallel calls must not be double-counted as wall time);
+- distinct read targets, repeated identical read requests including their range
+  arguments, and bytes of read content observed in supported completion events;
+- searches explicitly returning zero matches in supported structured fields;
+- malformed/oversized/unknown events, unmatched completions, unfinished calls,
+  tracking limits and whether the terminal event was seen.
+
+These are local event receipt timings. Buffered events can distort durations.
+The remaining time is **unclassified**, not model inference time. The documented
+`duration_api_ms` currently equals total duration and cannot isolate inference.
+Unknown tool schemas or missing result fields cannot establish zero activity.
+Repeated reads may be necessary cross-checks; counts alone do not justify cutting
+review work. Reported model is a CLI label, not proof of backend model routing.
+
+Performance schema 2 uses `null` (shown as `unavailable`) when event coverage
+cannot establish a detailed counter. All-unclassified tools must not imply zero
+reads or searches. The report includes classified/observed call counts, event
+coverage and per-metric observation counts. Supported tool containers may carry
+extra metadata; multiple candidate containers remain ambiguous.
+
+Bounded diagnostics retain at most 32 distinct event shapes and at most 16 field
+names per structural level, plus sanitized type/subtype/tool-name identifiers.
+They record timestamp presence/type, never timestamp-derived inference time.
+Arguments, results, messages and other content dictionaries are not traversed.
+Unknown labels are restricted to short identifiers with credential filtering;
+overflow is counted. CLI version is taken from the resolved install directory
+when its name matches the installer's date/hash format; no extra agent call is
+made. These diagnostics identify parser gaps, not evidence to shorten a review.
+
+Compatibility with CLI `2026.10.22-27dcf5f` was checked using live event shapes.
+Tool payloads can include `hookAdditionalContexts`, `toolCallId`, `startedAtMs`
+and `completedAtMs` metadata. `editToolCall` and `getMcpToolsToolCall` are
+classified as edit and tool discovery. `thinking` delta/completed envelopes are
+counted separately without inspecting their text; future subtypes stay unknown.
+These timestamps and event counts do not establish inference duration. Missing
+read content or search match-count fields remain missing observations even when
+every tool is classified.
+
+Parsing is capped at 1 MiB per record and 10000 tracked calls; larger records are
+drained and counted as missing observations, never sent back to the agent.
+Parser/report failures do not replace the agent exit status or rerun the model.
+If the collector fails its startup check, the original text invocation is used.
+Only artifact upload is best-effort; review failures remain failures. On a failed
+streamed run, `agent-stdout.log` contains only a fixed exit-code diagnostic, so raw
+error detail is unavailable by design. No performance threshold gates a review.
 
 1. GitHub places this action repository at `github.action_path` (it is public, so every caller can read it); the scripts are staged to `$RUNNER_TEMP/ccr/scripts`
 2. Resolve the PR (forks: dispatch fails, everything else skips) → validate the API Key → read back the previous review, round and embedded findings → check out the caller's PR head
@@ -170,6 +256,9 @@ Offline test (no network and no API Key required; a `gh` stub drives the real sc
 
 ```bash
 bash .github/scripts/test-review-assembly.sh
+bash .github/scripts/test-install-cursor-cli.sh
+python3 .github/scripts/test-review-inputs.py
+python3 .github/scripts/test-review-performance.py
 ```
 
 It covers the placeholder substitution order (a review context must not forge the nonce or the round), `default-review-context.md` staying within `REVIEW_CONTEXT_MAX`, previous-comment selection and round increment, plus edge cases such as fail-open, a body left with nothing but the marker, and oversized truncation. It also drives `extract-findings.py` through every `findings=` outcome and `post-review-comment.sh` through the footer and the edited-comment fallback.
