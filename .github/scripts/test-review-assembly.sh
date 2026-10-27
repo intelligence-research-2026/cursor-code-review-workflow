@@ -91,6 +91,7 @@ t = p.read_text()
 t = t.replace("__UNTRUSTED_NONCE__", os.environ["UNTRUSTED_NONCE"])
 t = t.replace("__REVIEW_ROUND__", os.environ["REVIEW_ROUND"])
 t = t.replace("__PR_BODY_DECISIONS_RULE__", os.environ["PR_BODY_DECISIONS_RULE"])
+t = t.replace("__REVIEW_INPUTS_INDEX__", "ccr-review-data-test/index.txt")
 t = t.replace("__REVIEW_PRIORITIES__", os.environ["REVIEW_PRIORITIES"])
 p.write_text(t)
 PY
