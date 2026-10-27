@@ -256,7 +256,9 @@ Offline test (no network and no API Key required; a `gh` stub drives the real sc
 
 ```bash
 bash .github/scripts/test-review-assembly.sh
+bash .github/scripts/test-install-cursor-cli.sh
 python3 .github/scripts/test-review-inputs.py
+python3 .github/scripts/test-review-performance.py
 ```
 
 It covers the placeholder substitution order (a review context must not forge the nonce or the round), `default-review-context.md` staying within `REVIEW_CONTEXT_MAX`, previous-comment selection and round increment, plus edge cases such as fail-open, a body left with nothing but the marker, and oversized truncation. It also drives `extract-findings.py` through every `findings=` outcome and `post-review-comment.sh` through the footer and the edited-comment fallback.
