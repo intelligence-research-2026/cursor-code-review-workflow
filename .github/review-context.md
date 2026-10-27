@@ -7,7 +7,8 @@
 ## Architecture invariants (violations are findings)
 
 The CI review runs against an untrusted checkout, so `.cursor/rules/**` and
-`AGENTS.md` are deleted before the agent starts. Binding review guidance belongs
+`AGENTS.md` are deleted before the agent starts. Inert text snapshots and complete
+diff parts remain available as untrusted review evidence. Binding review guidance belongs
 in base-branch `.github/review-context.md` (or the `review_context` input), not in
 PR-head rule files:
 
@@ -36,8 +37,9 @@ These are deliberate, already-reviewed trade-offs in `action.yml` and
 - Scrubbing `review.md` only catches literal secrets and common token shapes.
   High-entropy or encoded leakage is a known residual risk; heuristic
   high-entropy filtering was rejected because it mangles diff hashes and long URLs.
-- Oversized title / body / diff are truncated by design, so a review may be
-  incomplete; that is preferred over blowing up the prompt.
+- Oversized title / body and the inline diff preview are truncated by design.
+  Complete diff parts remain in the local evidence index. If a required input
+  is still unavailable, the review must state the coverage gap.
 - Install always downloads https://cursor.com/install and runs that script.
   `installer_sha256` is accepted and ignored. The bootstrap script and, unless
   `agent_sha256` is set, the CLI binary are not pinned.

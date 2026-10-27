@@ -157,6 +157,30 @@ Consumers should trust the data only when all of these hold:
 
 The Action itself never updates a comment someone else edited last; it posts a fresh one instead.
 
+## Large diffs and removed rule files
+
+Before deleting PR-head instruction files, the Action prepares a fresh
+`ccr-review-data-*/index.txt` directory inside the checkout. The index lists every
+changed file with complete diff parts (at most 48000 UTF-8 bytes per part), plus
+inert text snapshots of readable regular tracked files under `.cursor`,
+`.cursorrules` and root `AGENTS.md`. Source paths remain in the index; generated
+filenames are ordinary `.txt` files so the CLI cannot auto-load them as rules.
+Snapshots use the existing Read allow/deny permissions and do not follow
+symlinks. Binary files and head snapshots over 2 MiB are marked unavailable.
+
+Diffs are generated from the resolved base/head commit IDs after checkout, so
+a push during setup cannot mix revisions. Only the inline preview is capped at
+60000 bytes; the complete per-file parts stay available to the agent. The prompt
+directs the agent to the index first and forbids searching the host for deleted
+originals. Each entry records whether its inline preview is complete, partial or
+omitted, so the agent can fill the gaps without re-reading every diff. Any
+remaining coverage gap must be stated in the review.
+
+The agent logs its start, elapsed time every 30 seconds, and completion time.
+These timing messages do not include prompts or intermediate model output.
+Manual reruns still start a new review: the same head may be reviewed with a
+different base, model or `review_context`, so a head-SHA-only cache is unsafe.
+
 ## Behavior summary
 
 1. GitHub places this action repository at `github.action_path` (it is public, so every caller can read it); the scripts are staged to `$RUNNER_TEMP/ccr/scripts`
@@ -170,6 +194,7 @@ Offline test (no network and no API Key required; a `gh` stub drives the real sc
 
 ```bash
 bash .github/scripts/test-review-assembly.sh
+python3 .github/scripts/test-review-inputs.py
 ```
 
 It covers the placeholder substitution order (a review context must not forge the nonce or the round), `default-review-context.md` staying within `REVIEW_CONTEXT_MAX`, previous-comment selection and round increment, plus edge cases such as fail-open, a body left with nothing but the marker, and oversized truncation. It also drives `extract-findings.py` through every `findings=` outcome and `post-review-comment.sh` through the footer and the edited-comment fallback.

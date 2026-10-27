@@ -32,7 +32,10 @@ workflow, and the impact you expect.
   same way, because anyone with write access can edit it.
 - Rule files on the PR head (`.cursor`, `.cursorrules`, `AGENTS.md`) are deleted
   before the agent starts, so a pull request cannot supply its own "trusted"
-  rules.
+  rules. Before deletion, regular tracked files allowed by the existing Read
+  permissions are saved as inert `.txt` evidence. Symlinks are never followed;
+  denied, binary or oversized head snapshots are explicitly marked unavailable.
+  These copies and the complete diff parts remain untrusted review data.
 - The Install step downloads the current Cursor install script from
   https://cursor.com/install and runs it. `installer_sha256` is ignored.
   `agent_sha256`, when set, still verifies the CLI binary after install.
