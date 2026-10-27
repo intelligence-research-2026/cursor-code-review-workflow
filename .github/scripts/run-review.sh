@@ -188,12 +188,23 @@ stop_heartbeat() {
   wait "${heartbeat_pid}" 2>/dev/null || true
 }
 trap stop_heartbeat EXIT
-set +e
-"$AGENT_BIN" -p --trust --output-format text \
-  --model "$CURSOR_MODEL" \
-  < /tmp/review-prompt.txt 2>&1 | tee "${agent_log}"
-agent_ec=${PIPESTATUS[0]}
-set -e
+if python3 "${SCRIPTS_DIR}/measure-review.py" --check >/dev/null 2>&1; then
+  set +e
+  python3 "${SCRIPTS_DIR}/measure-review.py" -- \
+    "$AGENT_BIN" -p --trust --output-format stream-json --model "$CURSOR_MODEL" \
+    < /tmp/review-prompt.txt
+  agent_ec=$?
+  set -e
+  # Raw NDJSON includes prompts and tool results. Never tee or upload it.
+  printf 'Agent exit code: %s. Raw event bodies were discarded.\n' "${agent_ec}" > "${agent_log}"
+else
+  echo "::warning::Performance collector unavailable; using the original text invocation"
+  set +e
+  "$AGENT_BIN" -p --trust --output-format text --model "$CURSOR_MODEL" \
+    < /tmp/review-prompt.txt 2>&1 | tee "${agent_log}"
+  agent_ec=${PIPESTATUS[0]}
+  set -e
+fi
 stop_heartbeat
 trap - EXIT
 echo "::notice::review_agent_finished elapsed_seconds=$((SECONDS - review_started)) exit_code=${agent_ec}"

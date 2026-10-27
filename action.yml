@@ -178,6 +178,15 @@ runs:
         bash "${SCRIPTS_DIR}/run-review.sh"
       shell: bash
 
+    - name: Upload review performance
+      if: always() && steps.meta.outputs.skip != 'true'
+      continue-on-error: true
+      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      with:
+        name: cursor-review-performance-${{ inputs.pr_number }}
+        path: ${{ runner.temp }}/cursor-review-performance.json
+        if-no-files-found: ignore
+
     - name: Scrub agent-stdout.log
       id: scrub_agent_stdout
       if: failure() && steps.meta.outputs.skip != 'true' && steps.run_review.outcome == 'failure'

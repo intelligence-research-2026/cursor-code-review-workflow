@@ -46,4 +46,5 @@ Before opening a pull request, run the offline test:
 bash .github/scripts/test-review-assembly.sh
 bash .github/scripts/test-install-cursor-cli.sh
 python3 .github/scripts/test-review-inputs.py
+python3 .github/scripts/test-review-performance.py
 ```

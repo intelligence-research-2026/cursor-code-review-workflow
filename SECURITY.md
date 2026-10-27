@@ -42,6 +42,12 @@ workflow, and the impact you expect.
 
 ## Known residual risks
 
+Performance collection reads structured CLI events in memory and persists only
+aggregate counters, timings and a validated CLI model label. Raw prompts, file
+paths, arguments, source, results and stderr are not retained. Identifiers are
+salted per run and discarded with the collector. The performance artifact does
+not contain raw agent logs; its upload is best-effort and does not gate review.
+
 These are deliberate, reviewed trade-offs and are documented in
 [`.github/review-context.md`](.github/review-context.md): the install step runs the
 current bootstrap script with no checksum, `agent_sha256` is optional, scrubbing

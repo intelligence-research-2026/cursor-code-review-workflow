@@ -183,6 +183,44 @@ different base, model or `review_context`, so a head-SHA-only cache is unsafe.
 
 ## Behavior summary
 
+### Performance observations
+
+The print-mode invocation uses `--output-format stream-json` following the
+[Cursor output format reference](https://cursor.com/docs/cli/reference/output-format).
+Model selection, prompt, permissions, review output and analysis time are not
+changed. `measure-review.py` consumes the stream without writing raw events to
+disk or logs. User/assistant text, tool arguments, file paths and tool results
+are discarded; per-run salted digests are used only in memory to count repeated
+read requests. The terminal text is also discarded: `review.md` remains the
+authoritative review output. Stderr is counted as unparseable records, not saved.
+
+The Actions Summary and `cursor-review-performance-<PR>` artifact contain:
+
+- elapsed time, time to the first event and the model name reported by CLI init;
+- fixed base/head revisions and the configured model for comparing runs;
+- tool starts/completions, summed durations and the union of completed tool
+  intervals (parallel calls must not be double-counted as wall time);
+- distinct read targets, repeated identical read requests including their range
+  arguments, and bytes of read content observed in supported completion events;
+- searches explicitly returning zero matches in supported structured fields;
+- malformed/oversized/unknown events, unmatched completions, unfinished calls,
+  tracking limits and whether the terminal event was seen.
+
+These are local event receipt timings. Buffered events can distort durations.
+The remaining time is **unclassified**, not model inference time. The documented
+`duration_api_ms` currently equals total duration and cannot isolate inference.
+Unknown tool schemas or missing result fields cannot establish zero activity.
+Repeated reads may be necessary cross-checks; counts alone do not justify cutting
+review work. Reported model is a CLI label, not proof of backend model routing.
+
+Parsing is capped at 1 MiB per record and 10000 tracked calls; larger records are
+drained and counted as missing observations, never sent back to the agent.
+Parser/report failures do not replace the agent exit status or rerun the model.
+If the collector fails its startup check, the original text invocation is used.
+Only artifact upload is best-effort; review failures remain failures. On a failed
+streamed run, `agent-stdout.log` contains only a fixed exit-code diagnostic, so raw
+error detail is unavailable by design. No performance threshold gates a review.
+
 1. GitHub places this action repository at `github.action_path` (it is public, so every caller can read it); the scripts are staged to `$RUNNER_TEMP/ccr/scripts`
 2. Resolve the PR (forks: dispatch fails, everything else skips) → validate the API Key → read back the previous review, round and embedded findings → check out the caller's PR head
 3. Verify and install the Cursor CLI → the agent writes nothing but `review.md`, under the allowlist

@@ -16,6 +16,7 @@ ranges.
    bash .github/scripts/test-review-assembly.sh
    bash .github/scripts/test-install-cursor-cli.sh
    python3 .github/scripts/test-review-inputs.py
+   python3 .github/scripts/test-review-performance.py
    ```
 
 3. Open a pull request into `develop`, which rejects force pushes and deletion.
