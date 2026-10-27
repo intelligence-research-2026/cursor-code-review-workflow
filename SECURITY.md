@@ -43,9 +43,13 @@ workflow, and the impact you expect.
 ## Known residual risks
 
 Performance collection reads structured CLI events in memory and persists only
-aggregate counters, timings and a validated CLI model label. Raw prompts, file
-paths, arguments, source, results and stderr are not retained. Identifiers are
-salted per run and discarded with the collector. The performance artifact does
+aggregate counters, timings, a validated CLI model label and bounded event-shape
+diagnostics. Diagnostics retain only sanitized structural field names and short
+type/subtype/tool-name identifiers; arguments, results and messages are not
+traversed. Raw prompts, file paths, arguments, source, results and stderr are not
+retained. Call IDs and read identities are salted per run and discarded with the
+collector. The CLI version is derived from the validated install directory name,
+without saving its path or making another agent invocation. The performance artifact does
 not contain raw agent logs; its upload is best-effort and does not gate review.
 
 These are deliberate, reviewed trade-offs and are documented in

@@ -213,6 +213,21 @@ Unknown tool schemas or missing result fields cannot establish zero activity.
 Repeated reads may be necessary cross-checks; counts alone do not justify cutting
 review work. Reported model is a CLI label, not proof of backend model routing.
 
+Performance schema 2 uses `null` (shown as `unavailable`) when event coverage
+cannot establish a detailed counter. All-unclassified tools must not imply zero
+reads or searches. The report includes classified/observed call counts, event
+coverage and per-metric observation counts. Supported tool containers may carry
+extra metadata; multiple candidate containers remain ambiguous.
+
+Bounded diagnostics retain at most 32 distinct event shapes and at most 16 field
+names per structural level, plus sanitized type/subtype/tool-name identifiers.
+They record timestamp presence/type, never timestamp-derived inference time.
+Arguments, results, messages and other content dictionaries are not traversed.
+Unknown labels are restricted to short identifiers with credential filtering;
+overflow is counted. CLI version is taken from the resolved install directory
+when its name matches the installer's date/hash format; no extra agent call is
+made. These diagnostics identify parser gaps, not evidence to shorten a review.
+
 Parsing is capped at 1 MiB per record and 10000 tracked calls; larger records are
 drained and counted as missing observations, never sent back to the agent.
 Parser/report failures do not replace the agent exit status or rerun the model.

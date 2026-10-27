@@ -20,6 +20,31 @@ import time
 
 MAX_RECORD = 1024 * 1024
 MAX_CALLS = 10000
+MAX_SHAPES = 32
+MAX_FIELDS = 16
+TOOL_KINDS = {
+    "readToolCall": "read", "Read": "read", "read_file": "read",
+    "writeToolCall": "write", "Write": "write",
+    "grepToolCall": "search", "globToolCall": "search",
+    "Grep": "search", "Glob": "search", "shellToolCall": "shell",
+}
+
+
+def schema_label(value):
+    # Schema identifiers only, never a free-form text or path value.
+    if not isinstance(value, str) or not re.fullmatch(r"[A-Za-z][A-Za-z0-9_]{0,63}", value):
+        return "redacted"
+    return value if model_label(value) is not None else "redacted"
+
+
+def cli_version(command):
+    # The installer resolves the executable inside versions/<date>-<hash>.
+    # Do not run an extra CLI invocation or persist its absolute path.
+    try:
+        name = Path(command[0]).resolve().parent.name
+        return name if re.fullmatch(r"20\d{2}\.\d{2}\.\d{2}-[0-9a-f]{7,40}", name) else None
+    except Exception:
+        return None
 
 
 def model_label(value):
@@ -54,15 +79,58 @@ class Metrics:
         self.tools = collections.defaultdict(lambda: {"started": 0, "completed": 0, "seconds": 0.0})
         self.read_bytes = self.empty_searches = 0
         self.terminal = False
+        self.events = 0
+        self.shapes = collections.Counter()
+        self.diagnostic_overflow = 0
+        self.version = None
+        self.read_path_events = self.read_content_events = self.search_result_events = 0
+
+    def diagnose(self, event):
+        def fields(obj):
+            return [schema_label(k) for k in list(obj)[:MAX_FIELDS]]
+
+        shape = {"type": schema_label(event.get("type")),
+                 "subtype": schema_label(event["subtype"]) if "subtype" in event else None,
+                 "fields": fields(event), "timestamp_fields": {}}
+        for key in ("timestamp", "timestamp_ms"):
+            if key in event:
+                value = event[key]
+                shape["timestamp_fields"][key] = "number" if type(value) in (int, float) else "non_numeric"
+        call = event.get("tool_call")
+        if isinstance(call, dict):
+            shape["tool_fields"] = fields(call)
+            shape["payload_fields"] = {}
+            shape["name_fields"] = {}
+            for key in ("name", "tool_name"):
+                if key in call:
+                    shape["name_fields"][f"tool_call.{key}"] = schema_label(call[key])
+            for key, payload in list(call.items())[:MAX_FIELDS]:
+                # Never traverse argument/result/message dictionaries. Inspect
+                # only immediate structural fields of tool-specific containers.
+                if isinstance(payload, dict) and (key == "function" or re.fullmatch(r"[A-Za-z]+ToolCall", key)):
+                    safe_key = schema_label(key)
+                    shape["payload_fields"][safe_key] = fields(payload)
+                    if key == "function" and "name" in payload:
+                        shape["name_fields"]["tool_call.function.name"] = schema_label(payload["name"])
+        signature = json.dumps(shape, sort_keys=True)
+        if signature in self.shapes or len(self.shapes) < MAX_SHAPES:
+            self.shapes[signature] += 1
+        else:
+            self.diagnostic_overflow += 1
 
     def digest(self, value):
         return hmac.new(self.key, json.dumps(value, sort_keys=True).encode(), hashlib.sha256).hexdigest()
 
     def tool(self, event):
         call = event.get("tool_call", {})
-        if not isinstance(call, dict) or len(call) != 1:
+        if not isinstance(call, dict):
             return "other", {}, {}
-        name, payload = next(iter(call.items()))
+        candidates = [key for key in call if key == "function" or key in TOOL_KINDS
+                      or re.fullmatch(r"[A-Za-z]+ToolCall", key)]
+        if len(candidates) != 1:
+            return "other", {}, {}  # Multiple tool payloads are ambiguous.
+        name = candidates[0]
+        payload = call[name]
         if not isinstance(payload, dict):
             return "other", {}, {}
         args = payload.get("args", {})
@@ -71,12 +139,7 @@ class Metrics:
             args = payload.get("arguments", {})
             if isinstance(args, str):
                 args = json.loads(args)
-        kind = {
-            "readToolCall": "read", "Read": "read", "read_file": "read",
-            "writeToolCall": "write", "Write": "write",
-            "grepToolCall": "search", "globToolCall": "search",
-            "Grep": "search", "Glob": "search", "shellToolCall": "shell",
-        }.get(name, "other")
+        kind = TOOL_KINDS.get(name, "other")
         return kind, args if isinstance(args, dict) else {}, payload.get("result", {})
 
     def event(self, event, now):
@@ -85,6 +148,8 @@ class Metrics:
             return
         if self.first is None:
             self.first = now
+        self.events += 1
+        self.diagnose(event)
         event_type = event["type"]
         if event_type == "system" and event.get("subtype") == "init":
             self.model = model_label(event.get("model"))
@@ -113,6 +178,7 @@ class Metrics:
             self.starts[call_id] = (now, kind)
             self.tools[kind]["started"] += 1
             if kind == "read" and isinstance(args.get("path"), str):
+                self.read_path_events += 1
                 # Normalize spelling only; never open or resolve the target.
                 normalized = dict(args, path=os.path.abspath(args["path"]))
                 self.reads[self.digest(normalized)] += 1
@@ -133,17 +199,28 @@ class Metrics:
             success = result.get("success", {}) if isinstance(result, dict) else {}
             if isinstance(success, dict):
                 if kind == "read" and isinstance(success.get("content"), str):
+                    self.read_content_events += 1
                     self.read_bytes += len(success["content"].encode("utf-8"))
-                if kind == "search" and any(type(success.get(k)) is int and success[k] == 0
-                                            for k in ("numMatches", "matchCount")):
-                    self.empty_searches += 1
+                matches = next((success[k] for k in ("numMatches", "matchCount")
+                                if type(success.get(k)) is int and success[k] >= 0), None)
+                if kind == "search" and matches is not None:
+                    self.search_result_events += 1
+                    self.empty_searches += int(matches == 0)
         else:
             self.unknown += 1
 
     def report(self, elapsed, code):
         busy = union_seconds(self.intervals)
+        total = sum(t["started"] for t in self.tools.values())
+        classified = total - self.tools.get("other", {}).get("started", 0)
+        complete = (self.terminal and classified == total and not any((self.invalid,
+                    self.oversized, self.unknown, self.unmatched, self.capped, self.starts)))
+        read_started = self.tools.get("read", {}).get("started", 0)
+        search_started = self.tools.get("search", {}).get("started", 0)
+        reads_available = complete and self.read_path_events == read_started
         return {
-            "schema": 1, "elapsed_seconds": round(elapsed, 3), "agent_exit_code": code,
+            "schema": 2, "elapsed_seconds": round(elapsed, 3), "agent_exit_code": code,
+            "cli_version": self.version,
             "revisions": {key: value for key in ("BASE_SHA", "HEAD_SHA")
                           if re.fullmatch(r"[0-9a-f]{40}|[0-9a-f]{64}", value := os.environ.get(key, ""))},
             "configured_model": model_label(os.environ.get("CURSOR_MODEL")),
@@ -151,10 +228,20 @@ class Metrics:
             "reported_model": self.model, "tool_union_seconds": round(busy, 3),
             "unclassified_seconds": round(max(0, elapsed - busy), 3),
             "tools": {k: dict(v, seconds=round(v["seconds"], 3)) for k, v in self.tools.items()},
-            "unique_read_files": len(self.files),
-            "repeated_read_requests": sum(n - 1 for n in self.reads.values()),
-            "observed_read_content_bytes": self.read_bytes,
-            "explicit_zero_match_searches": self.empty_searches,
+            "classified_tool_calls": classified, "observed_tool_calls": total,
+            "tool_classification_ratio": round(classified / total, 4) if total else None,
+            "observed_events": self.events,
+            "unknown_event_ratio": round(self.unknown / self.events, 4) if self.events else None,
+            "classification_complete": complete,
+            "unique_read_files": len(self.files) if reads_available else None,
+            "repeated_read_requests": sum(n - 1 for n in self.reads.values()) if reads_available else None,
+            "observed_read_content_bytes": self.read_bytes if self.read_content_events or (complete and not read_started) else None,
+            "explicit_zero_match_searches": self.empty_searches if self.search_result_events or (complete and not search_started) else None,
+            "read_calls_with_path": self.read_path_events,
+            "read_completions_with_content": self.read_content_events,
+            "search_completions_with_match_count": self.search_result_events,
+            "event_shapes": [dict(json.loads(shape), count=count) for shape, count in self.shapes.items()],
+            "diagnostic_overflow_events": self.diagnostic_overflow,
             "invalid_records": self.invalid, "oversized_records": self.oversized,
             "unknown_events": self.unknown, "unmatched_completions": self.unmatched,
             "unfinished_calls": len(self.starts), "tracking_limit_reached": self.capped,
@@ -187,23 +274,29 @@ def save_report(report):
         out.write("\n")
     summary = os.environ.get("GITHUB_STEP_SUMMARY")
     if summary:
+        def display(key):
+            return "unavailable" if report[key] is None else str(report[key])
         rows = ["### Cursor review performance", "",
                 "Timing uses event receipt times. Unclassified time is not inference time.", "",
                 f"- Agent elapsed: {report['elapsed_seconds']} s",
                 f"- First event: {report['first_event_seconds']} s",
                 f"- CLI-reported model: {report['reported_model'] or 'unavailable'}",
                 f"- Configured model: {report['configured_model'] or 'unavailable'}",
+                f"- CLI version: {report['cli_version'] or 'unavailable'}",
+                f"- Classified tools: {report['classified_tool_calls']}/{report['observed_tool_calls']}",
+                f"- Unknown events: {report['unknown_events']}/{report['observed_events']}",
                 f"- Completed tool intervals (union): {report['tool_union_seconds']} s",
                 f"- Unclassified: {report['unclassified_seconds']} s",
-                f"- Repeated read requests: {report['repeated_read_requests']} (not necessarily redundant)",
-                f"- Observed read content: {report['observed_read_content_bytes']} bytes",
-                f"- Explicit zero-match searches: {report['explicit_zero_match_searches']}", "",
+                f"- Repeated read requests: {display('repeated_read_requests')} (not necessarily redundant)",
+                f"- Observed read content bytes: {display('observed_read_content_bytes')}",
+                f"- Explicit zero-match searches: {display('explicit_zero_match_searches')}", "",
                 "| Tool | Started | Completed | Sum of durations (s) |",
                 "| --- | ---: | ---: | ---: |"]
         for kind, stats in sorted(report["tools"].items()):
             rows.append(f"| {kind} | {stats['started']} | {stats['completed']} | {stats['seconds']} |")
         rows += ["", "Parallel tool durations can overlap; use the union for wall time.",
                  "Counts are observations, not proof of review coverage or wasted work.",
+                "Unavailable means the event schema or coverage cannot establish a value; it does not mean zero.",
                  f"Record gaps: invalid={report['invalid_records']}, oversized={report['oversized_records']}, "
                  f"unknown={report['unknown_events']}, unfinished={report['unfinished_calls']}, "
                  f"unmatched={report['unmatched_completions']}, capped={report['tracking_limit_reached']}, "
@@ -216,6 +309,7 @@ def save_report(report):
 
 def main(command):
     metrics = Metrics()
+    metrics.version = cli_version(command)
     started = time.monotonic()
     child = subprocess.Popen(command, stdin=sys.stdin.buffer, stdout=subprocess.PIPE,
                              stderr=subprocess.STDOUT, start_new_session=True)

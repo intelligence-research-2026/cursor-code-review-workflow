@@ -25,6 +25,63 @@ def event(call_id, subtype, tool="readToolCall", args=None, result=None):
 
 
 class PerformanceTest(unittest.TestCase):
+    def test_unknown_calls_are_unavailable_not_zero(self):
+        m = module.Metrics()
+        m.event(event("a", "started", "futureToolCall"), 1)
+        m.event(event("a", "completed", "futureToolCall"), 2)
+        m.event({"type": "result"}, 3)
+        report = m.report(3, 0)
+        self.assertEqual(report["classified_tool_calls"], 0)
+        self.assertEqual(report["observed_tool_calls"], 1)
+        for key in ("unique_read_files", "repeated_read_requests",
+                    "observed_read_content_bytes", "explicit_zero_match_searches"):
+            self.assertIsNone(report[key])
+        with tempfile.TemporaryDirectory() as temp:
+            summary = Path(temp) / "summary.md"
+            with patch.dict(os.environ, RUNNER_TEMP=temp, GITHUB_STEP_SUMMARY=str(summary)):
+                module.save_report(report)
+            self.assertIn("Repeated read requests: unavailable", summary.read_text())
+
+    def test_metadata_is_tolerated_but_ambiguous_tools_are_not(self):
+        m = module.Metrics()
+        sample = event("a", "started")
+        sample["tool_call"]["metadata"] = {"private": "SECRET_METADATA"}
+        self.assertEqual(m.tool(sample)[0], "read")
+        sample["tool_call"]["grepToolCall"] = {}
+        self.assertEqual(m.tool(sample)[0], "other")
+        del sample["tool_call"]["grepToolCall"]
+        sample["tool_call"]["futureToolCall"] = {}
+        self.assertEqual(m.tool(sample)[0], "other")
+
+    def test_diagnostics_are_bounded_and_do_not_traverse_content(self):
+        m = module.Metrics()
+        sample = {"type": "tool_call", "subtype": "started", "call_id": "a", "timestamp": 100,
+                  "message": {"SECRET_MESSAGE": "SECRET_BODY"},
+                  "tool_call": {"function": {"name": "read_file",
+                      "arguments": {"path": "SECRET_PATH", "SECRET_ARGUMENT": "value"},
+                      "result": {"SECRET_RESULT": "SECRET_SOURCE"}}}}
+        m.event(sample, 1)
+        report = m.report(2, 0)
+        self.assertNotIn("SECRET_", json.dumps(report))
+        shape = report["event_shapes"][0]
+        self.assertEqual(shape["timestamp_fields"], {"timestamp": "number"})
+        self.assertEqual(shape["name_fields"], {"tool_call.function.name": "read_file"})
+        with patch.object(module, "MAX_SHAPES", 1):
+            m.event({"type": "future_event"}, 2)
+        self.assertEqual(m.report(3, 0)["diagnostic_overflow_events"], 1)
+        self.assertEqual(len(m.shapes), 1)
+
+    def test_schema_labels_filter_credentials_and_free_form_text(self):
+        with patch.dict(os.environ, CURSOR_API_KEY="sensitive_token"):
+            self.assertEqual(module.schema_label("sensitive_token"), "redacted")
+            self.assertEqual(module.schema_label("secret/path/value"), "redacted")
+            self.assertEqual(module.schema_label("readToolCall"), "readToolCall")
+
+    def test_cli_version_uses_install_directory_only(self):
+        self.assertEqual(module.cli_version(["/tmp/versions/2026.10.22-27dcf5f/cursor-agent"]),
+                         "2026.10.22-27dcf5f")
+        self.assertIsNone(module.cli_version(["/tmp/private-folder/cursor-agent"]))
+
     def test_overlap_repetition_and_explicit_empty_search(self):
         m = module.Metrics()
         m.event({"type": "system", "subtype": "init", "model": "Example Model"}, 1)
